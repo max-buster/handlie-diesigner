@@ -1,8 +1,8 @@
 # Handle Die Designer
 
 A web tool for designing mug-handle extruder dies. Draw a handle cross-section
-(the hole shape) on a to-scale 2" / 3mm plate, preview the extruded handle on a
-3D mug, and export the die plate as an SVG.
+(the hole shape) on a to-scale 2" / 5mm plate, preview the extruded handle on a
+3D mug, and export a print-ready order pack (STL + preview image + params).
 
 ## Run it
 
@@ -30,9 +30,14 @@ npm run preview
 - Fonts load from Google Fonts; offline they fall back to a system sans-serif.
 - The 3D preview avoids `OrbitControls` (drag-to-rotate is hand-rolled), so any
   recent `three` version works.
-- Export writes `die-plate.svg`: the 50.8 mm disc with the hole cut out
-  (`fill-rule: evenodd`), sized in real millimetres and ready to extrude to a
-  3 mm die in your slicer / CAD / Manifold step.
+- Export ("Preview & export" -> "Download order pack") writes
+  `die-order-<timestamp>.zip` containing:
+  - `die-spec/die-plate.stl` — the solid 50.8 mm x 5 mm die with the handle
+    profile cut through it and chamfered edges, pre-oriented to rest on the bed
+    (min Z = 0) so it slices consistently.
+  - `die-spec/die-view.png` — a 2D image of the die for visual comparison.
+  - `die-spec/params.json` — all profile dimensions, plate size, chamfers, and
+    print orientation (`format: "handle-diesigner/v1"`).
 
 ## Tuning knobs (in `die-designer.jsx`)
 

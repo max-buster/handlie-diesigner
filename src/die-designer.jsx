@@ -9,7 +9,10 @@ const CX = VB / 2;
 const CY = VB / 2;
 const DISC_R = 190;
 const DISC_MM = 50.8;
-const DISC_THICK_MM = 3;
+const DISC_THICK_MM = 5;
+const CHAMFER_MM = 0.4;
+const TOP_CHAMFER_MM = 0.8; // larger on the top rim so print flare stays inside the bore
+const HOLE_TOP_CHAMFER_MM = 0.3; // slight deburr on the hole's top (exit) edge
 const UPM = (DISC_R * 2) / DISC_MM;
 const u = (m) => m * UPM;
 
@@ -233,6 +236,7 @@ function MugPreview({ holeD }) {
   const mountRef = useRef(null);
   const pathRef = useRef(null);
   const ctx = useRef({});
+  const rotRef = useRef(35);
   const [rot, setRot] = useState(35);
   const [zoom, setZoom] = useState(1);
 
@@ -253,7 +257,7 @@ function MugPreview({ holeD }) {
       mount.appendChild(renderer.domElement);
       renderer.domElement.style.touchAction = "none";
 
-      scene.add(new THREE.HemisphereLight(0xffe9cf, 0x140d06, 0.5));
+      scene.add(new THREE.HemisphereLight(0xfff6e9, 0x5a4a38, 0.55));
       const key = new THREE.DirectionalLight(0xfff1df, 0.78); key.position.set(70, 150, 130); scene.add(key);
       const fill = new THREE.DirectionalLight(0xffd6a0, 0.18); fill.position.set(-140, 30, 70); scene.add(fill);
       const rim = new THREE.DirectionalLight(0xffe6c4, 0.3); rim.position.set(-60, 120, -150); scene.add(rim);
@@ -269,7 +273,7 @@ function MugPreview({ holeD }) {
       shadow.rotation.x = -Math.PI / 2; shadow.position.y = -47.6; scene.add(shadow);
 
       const group = new THREE.Group(); scene.add(group);
-      const clay = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 1.0, metalness: 0.0, side: THREE.DoubleSide });
+      const clay = new THREE.MeshStandardMaterial({ color: 0xc47c55, roughness: 1.0, metalness: 0.0, side: THREE.DoubleSide });
       const mug = new THREE.Mesh(buildMugGeometry(), clay);
       group.add(mug);
       const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshStandardMaterial({ color: 0x6b4e30, roughness: 1, side: THREE.DoubleSide }));
@@ -279,6 +283,31 @@ function MugPreview({ holeD }) {
 
       const c = ctx.current;
       Object.assign(c, { scene, camera, renderer, group, handle, mount, target, baseOffset });
+
+      // Drag-to-rotate: a horizontal sweep spins the mug, kept in sync with the slider.
+      let drag = null;
+      const dom = renderer.domElement;
+      const onDown = (e) => {
+        drag = { x: e.clientX, rot: rotRef.current };
+        if (dom.setPointerCapture) dom.setPointerCapture(e.pointerId);
+      };
+      const onMove = (e) => {
+        if (!drag) return;
+        let nr = Math.round(drag.rot + (e.clientX - drag.x) * 0.6);
+        nr = Math.max(-180, Math.min(180, nr));
+        group.rotation.y = (nr * Math.PI) / 180;
+        setRot(nr);
+      };
+      const onUp = (e) => {
+        if (drag && dom.releasePointerCapture && e.pointerId != null) {
+          try { dom.releasePointerCapture(e.pointerId); } catch (_) {}
+        }
+        drag = null;
+      };
+      dom.addEventListener("pointerdown", onDown);
+      dom.addEventListener("pointermove", onMove);
+      dom.addEventListener("pointerup", onUp);
+      dom.addEventListener("pointercancel", onUp);
 
       const ro = new ResizeObserver(() => {
         const w = mount.clientWidth || 320, h = mount.clientHeight || 300;
@@ -291,6 +320,10 @@ function MugPreview({ holeD }) {
 
       c.cleanup = () => {
         cancelAnimationFrame(raf); ro.disconnect();
+        dom.removeEventListener("pointerdown", onDown);
+        dom.removeEventListener("pointermove", onMove);
+        dom.removeEventListener("pointerup", onUp);
+        dom.removeEventListener("pointercancel", onUp);
         renderer.dispose();
         if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
       };
@@ -321,6 +354,7 @@ function MugPreview({ holeD }) {
   }, [holeD]);
 
   useEffect(() => {
+    rotRef.current = rot;
     const c = ctx.current;
     if (c && c.group) c.group.rotation.y = (rot * Math.PI) / 180;
   }, [rot]);
@@ -455,13 +489,13 @@ function dataUrlToBytes(dataUrl) {
 function rasterizeDie(holeD, size = 800) {
   return new Promise((resolve, reject) => {
     const disc = ellipsePath(CX, CY, DISC_R, DISC_R);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${VB} ${VB}"><path fill-rule="evenodd" d="${disc} ${holeD}" fill="#9a9a9a"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${VB} ${VB}"><defs><radialGradient id="dieGrad" cx="0.42" cy="0.36" r="0.72"><stop offset="0" stop-color="#c37a53"/><stop offset="1" stop-color="#a1592f"/></radialGradient></defs><path fill-rule="evenodd" d="${disc} ${holeD}" fill="url(#dieGrad)"/></svg>`;
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
     const img = new Image();
     img.onload = () => {
       const c = document.createElement("canvas"); c.width = size; c.height = size;
       const g = c.getContext("2d");
-      g.fillStyle = "#16140f"; g.fillRect(0, 0, size, size);
+      g.fillStyle = "#f4ecdb"; g.fillRect(0, 0, size, size);
       g.drawImage(img, 0, 0, size, size);
       URL.revokeObjectURL(url);
       resolve(dataUrlToBytes(c.toDataURL("image/png")));
@@ -471,16 +505,91 @@ function rasterizeDie(holeD, size = 800) {
   });
 }
 
+// Outward unit normal of the edge a->b (right-hand side for a CCW polygon).
+function edgeNormal2(a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+  return [dy / L, -dx / L];
+}
+// Offset a CCW polygon outward by d (enlarges the contour). Fine for small d.
+function offsetPolygon(pts, d) {
+  const n = pts.length, out = [];
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n], cur = pts[i], next = pts[(i + 1) % n];
+    const n1 = edgeNormal2(prev, cur), n2 = edgeNormal2(cur, next);
+    let nx = n1[0] + n2[0], ny = n1[1] + n2[1];
+    const L = Math.hypot(nx, ny) || 1;
+    out.push([cur[0] + (nx / L) * d, cur[1] + (ny / L) * d]);
+  }
+  return out;
+}
+
 // Solid die plate (mm): a disc the thickness of the plate with the handle
-// profile cut clean through it. Centred on the origin in all three axes.
-function buildDieGeometry(holeD) {
-  const shape = new THREE.Shape();
-  shape.absarc(0, 0, DISC_MM / 2, 0, Math.PI * 2, false);
-  const hole = new THREE.Path();
-  hole.setFromPoints(samplePathMM(holeD, 220).map(([x, y]) => new THREE.Vector2(x, y)));
-  shape.holes.push(hole);
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: DISC_THICK_MM, bevelEnabled: false, curveSegments: 64 });
-  geo.translate(0, 0, -DISC_THICK_MM / 2);
+// profile cut through it, centred on the origin. The outer rim is chamfered on
+// both faces and the hole's entry (bottom) edge is relieved with a lead-in,
+// while the hole's exit (top) edge is kept sharp so it defines the profile.
+function buildDieGeometry(holeD, chamfer = CHAMFER_MM, topChamfer = TOP_CHAMFER_MM, holeTopChamfer = HOLE_TOP_CHAMFER_MM) {
+  const T = DISC_THICK_MM, R = DISC_MM / 2;
+  const C = Math.min(chamfer, T / 2 - 0.1);
+  const Ctop = Math.min(topChamfer, T / 2 - 0.1);
+  const Chole = Math.min(holeTopChamfer, T / 2 - 0.1);
+  const zb = -T / 2, zt = T / 2;
+
+  // CCW loops in the xy-plane (mm), all centred on the disc.
+  const circle = (r, n = 160) => {
+    const a = [];
+    for (let i = 0; i < n; i++) { const t = (i / n) * Math.PI * 2; a.push([Math.cos(t) * r, Math.sin(t) * r]); }
+    return a;
+  };
+  const outerFull = circle(R), outerInset = circle(R - C), outerInsetTop = circle(R - Ctop);
+  let hole = samplePathMM(holeD, 200);
+  let area = 0;
+  for (let i = 0; i < hole.length; i++) { const a = hole[i], b = hole[(i + 1) % hole.length]; area += a[0] * b[1] - b[0] * a[1]; }
+  if (area < 0) hole = hole.slice().reverse(); // force CCW
+  const holeBig = offsetPolygon(hole, C);           // bottom entry lead-in
+  const holeTop = offsetPolygon(hole, Chole);        // slight top exit deburr
+
+  const pos = [], idx = [];
+  const pushLoop = (pts, z) => { const s = pos.length / 3; for (const p of pts) pos.push(p[0], p[1], z); return s; };
+  // Connect lower loop -> upper loop (same vertex count). flip reverses facing.
+  const strip = (lo, up, M, flip) => {
+    for (let i = 0; i < M; i++) {
+      const j = (i + 1) % M, A = lo + i, B = lo + j, U = up + i, D = up + j;
+      if (flip) idx.push(A, D, B, A, U, D); else idx.push(A, B, D, A, D, U);
+    }
+  };
+  // Triangulated annular cap (outer contour + hole), facing +z (up) or -z.
+  const cap = (contour, holePts, z, faceUp) => {
+    const holeCW = holePts.slice().reverse();
+    const tris = THREE.ShapeUtils.triangulateShape(
+      contour.map((p) => new THREE.Vector2(p[0], p[1])),
+      [holeCW.map((p) => new THREE.Vector2(p[0], p[1]))]
+    );
+    const base = pushLoop(contour.concat(holeCW), z);
+    for (const t of tris) {
+      if (faceUp) idx.push(base + t[0], base + t[1], base + t[2]);
+      else idx.push(base + t[0], base + t[2], base + t[1]);
+    }
+  };
+
+  // Outer wall: chamfer (bottom) -> straight -> chamfer (top).
+  const NO = outerFull.length;
+  const O0 = pushLoop(outerInset, zb), O1 = pushLoop(outerFull, zb + C);
+  const O2 = pushLoop(outerFull, zt - Ctop), O3 = pushLoop(outerInsetTop, zt);
+  strip(O0, O1, NO, false); strip(O1, O2, NO, false); strip(O2, O3, NO, false);
+
+  // Hole wall: lead-in chamfer (bottom), straight land, slight chamfer (top).
+  const NH = hole.length;
+  const H0 = pushLoop(holeBig, zb), H1 = pushLoop(hole, zb + C);
+  const H2 = pushLoop(hole, zt - Chole), H3 = pushLoop(holeTop, zt);
+  strip(H0, H1, NH, true); strip(H1, H2, NH, true); strip(H2, H3, NH, true);
+
+  // Faces.
+  cap(outerInset, holeBig, zb, false);
+  cap(outerInsetTop, holeTop, zt, true);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
   geo.computeVertexNormals();
   return geo;
 }
@@ -498,6 +607,8 @@ async function buildOrderBundle(geo, holeD, params) {
     shape: params.shape,
     displayUnits: params.unit,
     plate: { diameter_mm: DISC_MM, thickness_mm: DISC_THICK_MM },
+    chamfer: { size_mm: CHAMFER_MM, topRim_mm: TOP_CHAMFER_MM, holeTop_mm: HOLE_TOP_CHAMFER_MM, edges: "outer rim bottom + hole entry (bottom) = 0.4mm; outer top rim = 0.8mm; hole exit (top) = 0.3mm deburr" },
+    printOrientation: "rests on bed (min Z = 0), chamfered entry face down, sharp land face up",
     profile_mm: {
       width: params.sw, height: params.sh, cornerRadius: params.sr,
       grooveDepth: params.gd, grooveWidth: params.grooveW, waistHeight: params.waistH,
@@ -506,8 +617,15 @@ async function buildOrderBundle(geo, holeD, params) {
 
   const png = await rasterizeDie(holeD);
 
+  // Orient for slicing: rest the chamfered entry face on the bed (min Z = 0)
+  // with the sharp land facing up, so every import lands identically in Bambu.
+  const exportGeo = geo.clone();
+  exportGeo.translate(0, 0, DISC_THICK_MM / 2);
+  const stl = geometryToStl(exportGeo, "die-plate");
+  exportGeo.dispose();
+
   const zip = zipStore([
-    { name: "die-spec/die-plate.stl", data: enc.encode(geometryToStl(geo, "die-plate")) },
+    { name: "die-spec/die-plate.stl", data: enc.encode(stl) },
     { name: "die-spec/die-view.png", data: png },
     { name: "die-spec/params.json", data: enc.encode(JSON.stringify(meta, null, 2)) },
   ]);
@@ -542,7 +660,7 @@ function StlPreviewModal({ holeD, params, onClose }) {
     const rim = new THREE.DirectionalLight(0xbfd4ff, 0.35); rim.position.set(-60, 40, -50); scene.add(rim);
 
     const geo = buildDieGeometry(holeD);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.82, metalness: 0.04, side: THREE.DoubleSide }));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xc47c55, roughness: 0.82, metalness: 0.04, side: THREE.DoubleSide }));
     scene.add(mesh);
     three.current = { geo, renderer, scene, camera };
 
@@ -636,31 +754,42 @@ export default function DieDesigner() {
 
       <header className="hd">
         <h1>Handle Diesigner</h1>
-        <div className="eyebrow">Scott Creek Super Duper Clay Gun · 2&quot; wide · .25&quot; tall</div>
+        <div className="eyebrow">Scott Creek Super Duper Clay Gun · 2&quot; wide · 5mm tall</div>
       </header>
 
       <div className="stage">
-        <div className="bench">
-          <svg viewBox={`0 0 ${VB} ${VB}`} className="canvas">
-            <path fillRule="evenodd" d={`${ellipsePath(CX, CY, DISC_R, DISC_R)} ${holeD}`} fill="#9a9a9a" />
-          </svg>
-        </div>
+        <div className="previews">
+          <div className="bench">
+            <svg viewBox={`0 0 ${VB} ${VB}`} className="canvas">
+              <defs>
+                <radialGradient id="dieGrad" cx="0.42" cy="0.36" r="0.72">
+                  <stop offset="0" stopColor="#c37a53" />
+                  <stop offset="1" stopColor="#a1592f" />
+                </radialGradient>
+              </defs>
+              <path fillRule="evenodd" d={`${ellipsePath(CX, CY, DISC_R, DISC_R)} ${holeD}`} fill="url(#dieGrad)" />
+            </svg>
+          </div>
 
-        <div className="rightcol">
           <div className="mugcard">
             <div className="mugcard-label">On a mug</div>
             <MugPreview holeD={holeD} />
           </div>
+        </div>
 
-          <aside className="panel">
+        <aside className="panel">
+          <div className="ctl ctl-shapes">
             <div className="shape-row">
               {shapes.map(([id, label]) => (
                 <button key={id} className={`shape ${shape === id ? "on" : ""}`} onClick={() => setShape(id)}>
-                  <svg className="gly" viewBox="0 0 46 30"><path d={previewD(id)} fill="#cdac80" /></svg>
+                  <svg className="gly" viewBox="0 0 46 30"><path d={previewD(id)} fill="#5f6b47" /></svg>
                   {label}
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="ctl ctl-dims">
             <div className="unit-row">
               <span>Units</span>
               <div className="unit-toggle">
@@ -675,15 +804,12 @@ export default function DieDesigner() {
             {shape === "thumbgroove" && <Slider label="Groove depth" v={gd} set={setGd} min={1} max={Math.max(2, sh * 0.45)} unit={unit} />}
             {shape === "thumbgroove" && <Slider label="Groove width" v={grooveW} set={setGrooveW} min={4} max={Math.max(6, sw * 0.95)} unit={unit} />}
             {shape === "bone" && <Slider label="Waist height" v={waistH} set={setWaistH} min={1} max={Math.max(2, sh * 0.9)} unit={unit} />}
-            <div className="readout">
-              <span>Handle profile</span>
-              <b>{shape === "circle" ? `${fmtLen(sw, unit)} \u2300` : `${fmtLen(sw, unit)} \u00d7 ${fmtLen(sh, unit)}`}</b>
-            </div>
-            <button className="primary" onClick={() => setPreviewOpen(true)}>
-              <Download size={15} /> Preview &amp; export
-            </button>
-          </aside>
-        </div>
+          </div>
+        </aside>
+
+        <button className="primary primary-wide" onClick={() => setPreviewOpen(true)}>
+          <Download size={15} /> Preview &amp; export
+        </button>
       </div>
 
       {previewOpen && (
@@ -712,62 +838,66 @@ function Slider({ label, v, set, min, max, step = 0.5, unit = "mm" }) {
 }
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
-.root{--bench:#16140f;--p:#211d16;--p2:#2b261d;--line:#3a342a;--text:#ece2d0;--dim:#a79c87;--accent:#e08a3c;--accent2:#7fa8ad;
-  font-family:'Space Grotesk',system-ui,sans-serif;background:var(--bench);color:var(--text);min-height:100%;padding:20px;box-sizing:border-box;}
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Nunito:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+.root{--bench:#f4ecdb;--p:#fbf6ec;--p2:#efe3cd;--line:#ddcdb2;--text:#2e3a3a;--dim:#8a7d66;--accent:#b85c38;--accent2:#5f6b47;
+  font-family:'Nunito',system-ui,sans-serif;background:var(--bench);color:var(--text);min-height:100%;padding:20px;box-sizing:border-box;}
 .root *{box-sizing:border-box;}
 .hd{margin-bottom:16px;text-align:center;}
-.eyebrow{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);opacity:.85;}
-.hd h1{font-size:26px;font-weight:600;margin:0 0 4px;letter-spacing:-.01em;}
-.stage{display:grid;grid-template-columns:1fr 440px;gap:18px;align-items:start;}
-.bench{background:radial-gradient(120% 120% at 50% 30%,#221d15,#100e0a);border:1px solid var(--line);border-radius:16px;padding:18px;}
-.canvas{width:min(640px,100%);aspect-ratio:1;display:block;margin:0 auto;}
-.rightcol{display:flex;flex-direction:column;gap:18px;}
-.mugcard{position:relative;background:radial-gradient(120% 120% at 50% 25%,#241e15,#0e0c08);border:1px solid var(--line);border-radius:16px;padding:12px;}
+.eyebrow{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);opacity:.9;}
+.hd h1{font-family:'Fraunces',Georgia,serif;font-size:28px;font-weight:600;margin:0 0 4px;letter-spacing:-.01em;}
+.stage{display:flex;flex-direction:column;gap:16px;max-width:1180px;margin:0 auto;}
+.previews{display:grid;grid-template-columns:1fr 1fr;gap:16px;height:clamp(360px,58vh,620px);}
+.bench{display:flex;align-items:center;justify-content:center;min-height:0;min-width:0;background:radial-gradient(120% 120% at 50% 30%,#fbf6ec,#ece0c8);border:1px solid var(--line);border-radius:16px;padding:14px;}
+.canvas{width:100%;height:100%;display:block;}
+.mugcard{position:relative;display:flex;flex-direction:column;min-height:0;min-width:0;background:radial-gradient(120% 120% at 50% 25%,#fdf9f0,#ece0c8);border:1px solid var(--line);border-radius:16px;padding:12px;}
 .mugcard-label{font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:2px 2px 8px;}
-.mug3d{position:relative;width:100%;height:300px;border-radius:10px;overflow:hidden;}
+.mug3d{position:relative;width:100%;flex:1;min-height:0;border-radius:10px;overflow:hidden;cursor:grab;}
+.mug3d:active{cursor:grabbing;}
+.mug3d canvas{position:absolute;inset:0;width:100%!important;height:100%!important;display:block;z-index:0;}
 .mug-rot{margin-top:12px;}
-.zoomctl{position:absolute;right:8px;bottom:8px;display:flex;gap:6px;}
+.zoomctl{position:absolute;right:8px;bottom:8px;display:flex;gap:6px;z-index:2;}
 .zoomctl button{width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:17px;line-height:1;
-  background:rgba(33,29,22,.82);color:var(--text);border:1px solid var(--line);border-radius:7px;cursor:pointer;font-family:inherit;transition:.15s;}
+  background:rgba(251,246,236,.85);color:var(--text);border:1px solid var(--line);border-radius:7px;cursor:pointer;font-family:inherit;transition:.15s;}
 .zoomctl button:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
 .zoomctl button:disabled{opacity:.35;cursor:default;}
-.panel{background:var(--p);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px;}
+.panel{background:var(--p);border:1px solid var(--line);border-radius:16px;padding:16px;display:grid;grid-template-columns:minmax(220px,1fr) minmax(280px,1.5fr);gap:22px;align-items:start;box-shadow:0 1px 2px rgba(70,55,35,.05);}
+.ctl{display:flex;flex-direction:column;gap:12px;min-width:0;}
 .shape-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
 .shape{display:flex;align-items:center;gap:8px;background:var(--p2);border:1px solid var(--line);color:var(--dim);
   padding:9px 10px;border-radius:9px;font-size:12.5px;cursor:pointer;font-family:inherit;transition:.15s;}
 .shape:hover{color:var(--text);}
-.shape.on{border-color:var(--accent);color:var(--text);background:rgba(224,138,60,.1);}
+.shape.on{border-color:var(--accent);color:var(--text);background:rgba(184,92,56,.12);}
 .gly{width:26px;height:17px;flex:none;}
 .unit-row{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--dim);}
 .unit-toggle{display:inline-flex;background:var(--p2);border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px;}
 .unit-toggle button{border:none;background:none;color:var(--dim);font-family:'Space Mono',monospace;font-size:12px;
   padding:4px 12px;border-radius:6px;cursor:pointer;transition:.15s;}
-.unit-toggle button.on{background:var(--accent);color:#1a1206;}
+.unit-toggle button.on{background:var(--accent);color:#fbf6ec;}
 .sl{display:flex;flex-direction:column;gap:7px;}
 .sl-top{display:flex;justify-content:space-between;font-size:12.5px;color:var(--dim);}
 .sl-top b{color:var(--text);font-family:'Space Mono',monospace;font-weight:700;}
 .sl input{-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;background:var(--line);outline:none;}
-.sl input::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bench);}
-.sl input::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--bench);}
-.readout{background:var(--bench);border:1px solid var(--line);border-radius:11px;padding:11px 13px;display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--dim);}
+.sl input::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--p);}
+.sl input::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--p);}
+.readout{background:var(--p2);border:1px solid var(--line);border-radius:11px;padding:11px 13px;display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--dim);}
 .readout b{color:var(--text);font-family:'Space Mono',monospace;font-weight:700;}
-.primary{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--accent);color:#1a1206;border:none;
-  padding:11px;border-radius:9px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;}
-.primary:hover{background:#ec9a4f;}
+.primary{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--accent);color:#fbf6ec;border:none;
+  padding:11px;border-radius:9px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s;}
+.primary:hover{background:#c86a44;}
+.primary-wide{width:100%;padding:14px;font-size:14.5px;}
 .ghost{display:inline-flex;align-items:center;justify-content:center;background:var(--p2);color:var(--text);border:1px solid var(--line);
-  padding:11px 16px;border-radius:9px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;}
+  padding:11px 16px;border-radius:9px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s;}
 .ghost:hover{border-color:var(--dim);}
-.modal-backdrop{position:fixed;inset:0;background:rgba(8,7,5,.72);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;z-index:50;}
-.modal{width:min(720px,100%);background:var(--p);border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5);}
+.modal-backdrop{position:fixed;inset:0;background:rgba(46,40,30,.55);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;z-index:50;}
+.modal{width:min(720px,100%);background:var(--p);border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(60,45,25,.25);}
 .modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);
   font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);}
 .modal-x{background:none;border:none;color:var(--dim);font-size:22px;line-height:1;cursor:pointer;padding:0 4px;transition:.15s;}
 .modal-x:hover{color:var(--text);}
-.modal-3d{width:100%;height:min(60vh,440px);background:radial-gradient(120% 120% at 50% 30%,#221d15,#100e0a);}
-.modal-hint{padding:8px 16px 0;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);opacity:.6;text-align:center;}
+.modal-3d{width:100%;height:min(60vh,440px);background:radial-gradient(120% 120% at 50% 30%,#fdf9f0,#ece0c8);}
+.modal-hint{padding:8px 16px 0;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);opacity:.7;text-align:center;}
 .modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 16px;}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent2);outline-offset:2px;}
-@media (max-width:900px){.stage{grid-template-columns:1fr;}}
+@media (max-width:900px){.previews{grid-template-columns:1fr;height:auto;}.bench{aspect-ratio:1;}.mug3d{height:320px;flex:none;}.panel{grid-template-columns:1fr;}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
 `;

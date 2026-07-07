@@ -1,0 +1,50 @@
+{
+  "chamfer_mm": 0.4,
+  "sets": [
+    {
+      "name": "oval-handle-die-set",
+      "shape": "oval",
+      "sizes": [
+        { "label": "small", "width": 16, "height": 6 },
+        { "label": "medium", "width": 20.5, "height": 7.5 },
+        { "label": "large", "width": 25, "height": 9 }
+      ]
+    },
+    {
+      "name": "pebble-handle-die-set",
+      "shape": "pebble",
+      "sizes": [
+        { "label": "small", "width": 16, "height": 6 },
+        { "label": "medium", "width": 20.5, "height": 7.5 },
+        { "label": "large", "width": 25, "height": 9 }
+      ]
+    },
+    {
+      "name": "capsule-handle-die-set",
+      "shape": "capsule",
+      "sizes": [
+        { "label": "small", "width": 16, "height": 6 },
+        { "label": "medium", "width": 20.5, "height": 7.5 },
+        { "label": "large", "width": 25, "height": 9 }
+      ]
+    },
+    {
+      "name": "bone-handle-die-set",
+      "shape": "bone",
+      "sizes": [
+        { "label": "small", "width": 16, "height": 6, "waistHeight": 3.5 },
+        { "label": "medium", "width": 20.5, "height": 7.5, "waistHeight": 4.5 },
+        { "label": "large", "width": 25, "height": 9, "waistHeight": 5.5 }
+      ]
+    },
+    {
+      "name": "circle-handle-die-set",
+      "shape": "circle",
+      "sizes": [
+        { "label": "small", "width": 12, "height": 12 },
+        { "label": "medium", "width": 16, "height": 16 },
+        { "label": "large", "width": 20, "height": 20 }
+      ]
+    }
+  ]
+}
