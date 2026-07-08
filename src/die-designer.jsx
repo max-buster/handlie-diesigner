@@ -108,6 +108,134 @@ function bonePath(cx, cy, W, H, waistHalf) {
   ].join(" ");
 }
 
+// ---- Extra parametric profiles -------------------------------------------
+
+// Egg / teardrop: an ellipse whose width is skewed by height so the bottom is
+// fuller and the top tapers. taper 0 = plain oval; higher = pointier top.
+// Sampled as a polyline (robust, no self-intersection) and normalised so the
+// overall width stays W.
+function eggPath(cx, cy, W, H, taper) {
+  const a = W / 2, b = H / 2, d = Math.max(0, Math.min(0.85, taper));
+  const N = 84, raw = [];
+  let mx = 0;
+  for (let i = 0; i < N; i++) {
+    const th = (i / N) * Math.PI * 2, s = Math.sin(th);
+    const x = a * (1 + d * s) * Math.cos(th), y = b * s;
+    raw.push([x, y]); mx = Math.max(mx, Math.abs(x));
+  }
+  const sx = mx ? a / mx : 1;
+  return "M " + raw.map(([x, y]) => `${fmt(cx + x * sx)} ${fmt(cy + y)}`).join(" L ") + " Z";
+}
+
+// Chaikin corner-cutting: each pass gently rounds sharp vertices of a closed
+// polyline while leaving smooth stretches almost unchanged.
+function chaikin(pts, iters) {
+  let p = pts;
+  for (let k = 0; k < iters; k++) {
+    const out = [], n = p.length;
+    for (let i = 0; i < n; i++) {
+      const a = p[i], b = p[(i + 1) % n];
+      out.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]]);
+      out.push([0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
+    }
+    p = out;
+  }
+  return p;
+}
+
+// Upright heart (classic parametric curve), scaled to W x H, with the sharp
+// bottom tip and top notch softened by a few Chaikin passes.
+function heartPath(cx, cy, W, H) {
+  const N = 72, raw = [];
+  let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+  for (let i = 0; i < N; i++) {
+    const t = (i / N) * Math.PI * 2;
+    const x = 16 * Math.pow(Math.sin(t), 3);
+    const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+    raw.push([x, y]);
+    minx = Math.min(minx, x); maxx = Math.max(maxx, x);
+    miny = Math.min(miny, y); maxy = Math.max(maxy, y);
+  }
+  const sx = W / (maxx - minx), sy = H / (maxy - miny);
+  const ox = (minx + maxx) / 2, oy = (miny + maxy) / 2;
+  // formula y is up; invert to SVG (y down) so the lobes sit at the top.
+  const pts = chaikin(raw.map(([x, y]) => [cx + (x - ox) * sx, cy - (y - oy) * sy]), 3);
+  return "M " + pts.map((p) => `${fmt(p[0])} ${fmt(p[1])}`).join(" L ") + " Z";
+}
+
+// Rounded-rectangle body with `count` concave scallops cut into the top edge.
+function flutedPath(cx, cy, W, H, count, depth) {
+  const r = Math.min(H * 0.32, W * 0.12);
+  const xl = cx - W / 2, xr = cx + W / 2, yt = cy - H / 2, yb = cy + H / 2;
+  const n = Math.max(1, Math.round(count));
+  const x0 = xl + r, span = W - 2 * r, dep = Math.min(depth, H * 0.4);
+  // Smooth cosine scallops: rounded valleys AND rounded peaks (no sharp cusps).
+  const S = n * 18, d = [];
+  for (let i = 0; i <= S; i++) {
+    const t = i / S, x = x0 + t * span;
+    const y = yt + (dep / 2) * (1 - Math.cos(2 * Math.PI * n * t));
+    d.push(`${i === 0 ? "M" : "L"} ${fmt(x)} ${fmt(y)}`);
+  }
+  d.push(
+    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(xr)} ${fmt(yt + r)}`, `V ${fmt(yb - r)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(xr - r)} ${fmt(yb)}`, `H ${fmt(xl + r)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(xl)} ${fmt(yb - r)}`, `V ${fmt(yt + r)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(xl + r)} ${fmt(yt)}`, "Z",
+  );
+  return d.join(" ");
+}
+
+// Rounded ridge rising above the top edge — the inverse of a groove.
+function spinePath(cx, cy, W, H, peak) {
+  const r = Math.min(H * 0.4, W * 0.14);
+  const xl = cx - W / 2, xr = cx + W / 2, yt = cy - H / 2, yb = cy + H / 2;
+  const pk = Math.min(peak, H * 0.6), pw = Math.min(W * 0.6, (W - 2 * r) * 0.9);
+  const gx0 = cx - pw / 2, gx1 = cx + pw / 2;
+  return [
+    `M ${fmt(xl + r)} ${fmt(yt)}`, `L ${fmt(gx0)} ${fmt(yt)}`,
+    `Q ${fmt(cx)} ${fmt(yt - 2 * pk)} ${fmt(gx1)} ${fmt(yt)}`, `L ${fmt(xr - r)} ${fmt(yt)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(xr)} ${fmt(yt + r)}`, `V ${fmt(yb - r)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(xr - r)} ${fmt(yb)}`, `H ${fmt(xl + r)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(xl)} ${fmt(yb - r)}`, `V ${fmt(yt + r)}`,
+    `A ${fmt(r)} ${fmt(r)} 0 0 1 ${fmt(xl + r)} ${fmt(yt)}`, "Z",
+  ].join(" ");
+}
+
+// Marquise / leaf: pointed top and bottom, bulging to +/-W/2 at the centre.
+function leafPath(cx, cy, W, H) {
+  const yt = cy - H / 2, yb = cy + H / 2;
+  return [
+    `M ${fmt(cx)} ${fmt(yt)}`,
+    `Q ${fmt(cx + W)} ${fmt(cy)} ${fmt(cx)} ${fmt(yb)}`,
+    `Q ${fmt(cx - W)} ${fmt(cy)} ${fmt(cx)} ${fmt(yt)}`, "Z",
+  ].join(" ");
+}
+
+// Round the corners of a convex polygon with quadratic fillets (radius r).
+function roundedPolyPath(pts, r) {
+  const n = pts.length, d = [];
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n];
+    const v1x = p0[0] - p1[0], v1y = p0[1] - p1[1], v2x = p2[0] - p1[0], v2y = p2[1] - p1[1];
+    const l1 = Math.hypot(v1x, v1y) || 1, l2 = Math.hypot(v2x, v2y) || 1;
+    const rr = Math.min(r, l1 / 2, l2 / 2);
+    const a = [p1[0] + (v1x / l1) * rr, p1[1] + (v1y / l1) * rr];
+    const b = [p1[0] + (v2x / l2) * rr, p1[1] + (v2y / l2) * rr];
+    d.push(`${i === 0 ? "M" : "L"} ${fmt(a[0])} ${fmt(a[1])}`);
+    d.push(`Q ${fmt(p1[0])} ${fmt(p1[1])} ${fmt(b[0])} ${fmt(b[1])}`);
+  }
+  d.push("Z");
+  return d.join(" ");
+}
+
+// Rounded triangle (point up) and rounded diamond, via roundedPolyPath.
+function trianglePath(cx, cy, W, H, r) {
+  return roundedPolyPath([[cx, cy - H / 2], [cx + W / 2, cy + H / 2], [cx - W / 2, cy + H / 2]], r);
+}
+function diamondPath(cx, cy, W, H, r) {
+  return roundedPolyPath([[cx, cy - H / 2], [cx + W / 2, cy], [cx, cy + H / 2], [cx - W / 2, cy]], r);
+}
+
 function previewD(id) {
   const cx = 23, cy = 15;
   switch (id) {
@@ -119,6 +247,13 @@ function previewD(id) {
     case "pebble": return pebblePath(cx, cy, 30, 17);
     case "thumbgroove": return thumbGroovePath(cx, cy, 34, 15, 4, 5, 18);
     case "bone": return bonePath(cx, cy, 36, 15, 3.5);
+    case "teardrop": return eggPath(cx, cy, 26, 20, 0.45);
+    case "heart": return heartPath(cx, cy, 22, 22);
+    case "fluted": return flutedPath(cx, cy, 34, 16, 4, 3);
+    case "triangle": return trianglePath(cx, cy, 28, 20, 4);
+    case "diamond": return diamondPath(cx, cy, 24, 22, 3);
+    case "leaf": return leafPath(cx, cy, 18, 24);
+    case "spine": return spinePath(cx, cy, 34, 14, 3);
     default: return "";
   }
 }
@@ -612,6 +747,7 @@ async function buildOrderBundle(geo, holeD, params) {
     profile_mm: {
       width: params.sw, height: params.sh, cornerRadius: params.sr,
       grooveDepth: params.gd, grooveWidth: params.grooveW, waistHeight: params.waistH,
+      taper: params.taper, flutes: params.fluteN, fluteDepth: params.fluteD,
     },
   };
 
@@ -723,6 +859,9 @@ export default function DieDesigner() {
   const [gd, setGd] = useState(4);
   const [grooveW, setGrooveW] = useState(11);
   const [waistH, setWaistH] = useState(6);
+  const [taper, setTaper] = useState(0.45);
+  const [fluteN, setFluteN] = useState(4);
+  const [fluteD, setFluteD] = useState(2.2);
   const [unit, setUnit] = useState("mm");
   const holeD = useMemo(() => {
     const W = u(sw), H = u(sh);
@@ -735,9 +874,16 @@ export default function DieDesigner() {
       case "pebble": return pebblePath(CX, CY, W, H);
       case "thumbgroove": return thumbGroovePath(CX, CY, W, H, Math.min(H / 2, 0.28 * W), u(gd), u(grooveW));
       case "bone": return bonePath(CX, CY, W, H, u(waistH) / 2);
+      case "teardrop": return eggPath(CX, CY, W, H, taper);
+      case "heart": return heartPath(CX, CY, W, H);
+      case "fluted": return flutedPath(CX, CY, W, H, fluteN, u(fluteD));
+      case "triangle": return trianglePath(CX, CY, W, H, u(sr));
+      case "diamond": return diamondPath(CX, CY, W, H, u(sr));
+      case "leaf": return leafPath(CX, CY, W, H);
+      case "spine": return spinePath(CX, CY, W, H, u(gd));
       default: return "";
     }
-  }, [shape, sw, sh, sr, gd, grooveW, waistH]);
+  }, [shape, sw, sh, sr, gd, grooveW, waistH, taper, fluteN, fluteD]);
 
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -746,6 +892,10 @@ export default function DieDesigner() {
     ["rrect", "Rounded"], ["capsule", "Capsule"],
     ["dshape", "D-strap"], ["pebble", "Pebble"],
     ["thumbgroove", "Thumb groove"], ["bone", "Bone"],
+    ["teardrop", "Teardrop"], ["heart", "Heart"],
+    ["fluted", "Fluted"], ["triangle", "Triangle"],
+    ["diamond", "Diamond"], ["leaf", "Leaf"],
+    ["spine", "Spine"],
   ];
 
   return (
@@ -800,9 +950,13 @@ export default function DieDesigner() {
             </div>
             <Slider label={shape === "circle" ? "Diameter" : "Width"} v={sw} set={setSw} min={W_MIN} max={W_MAX} unit={unit} />
             {shape !== "circle" && <Slider label="Height" v={sh} set={setSh} min={H_MIN} max={H_MAX} unit={unit} />}
-            {shape === "rrect" && <Slider label="Corner radius" v={sr} set={setSr} min={0} max={Math.min(sw, sh) / 2} unit={unit} />}
+            {["rrect", "triangle", "diamond"].includes(shape) && <Slider label="Corner radius" v={sr} set={setSr} min={0} max={Math.min(sw, sh) / 2} unit={unit} />}
+            {shape === "teardrop" && <Slider label="Taper" v={taper} set={setTaper} min={0} max={0.8} step={0.05} fmt={(n) => `${Math.round(n * 100)}%`} />}
             {shape === "thumbgroove" && <Slider label="Groove depth" v={gd} set={setGd} min={1} max={Math.max(2, sh * 0.45)} unit={unit} />}
             {shape === "thumbgroove" && <Slider label="Groove width" v={grooveW} set={setGrooveW} min={4} max={Math.max(6, sw * 0.95)} unit={unit} />}
+            {shape === "fluted" && <Slider label="Flutes" v={fluteN} set={setFluteN} min={2} max={8} step={1} fmt={(n) => String(Math.round(n))} />}
+            {shape === "fluted" && <Slider label="Flute depth" v={fluteD} set={setFluteD} min={0.5} max={Math.max(1.5, sh * 0.3)} step={0.25} unit={unit} />}
+            {shape === "spine" && <Slider label="Peak height" v={gd} set={setGd} min={1} max={Math.max(2, sh * 0.6)} unit={unit} />}
             {shape === "bone" && <Slider label="Waist height" v={waistH} set={setWaistH} min={1} max={Math.max(2, sh * 0.9)} unit={unit} />}
           </div>
         </aside>
@@ -815,7 +969,7 @@ export default function DieDesigner() {
       {previewOpen && (
         <StlPreviewModal
           holeD={holeD}
-          params={{ shape, sw, sh, sr, gd, grooveW, waistH, unit }}
+          params={{ shape, sw, sh, sr, gd, grooveW, waistH, taper, fluteN, fluteD, unit }}
           onClose={() => setPreviewOpen(false)}
         />
       )}
@@ -828,10 +982,10 @@ function fmtLen(mm, unit) {
   return unit === "in" ? `${(mm / 25.4).toFixed(2)}″` : `${mm.toFixed(1)} mm`;
 }
 
-function Slider({ label, v, set, min, max, step = 0.5, unit = "mm" }) {
+function Slider({ label, v, set, min, max, step = 0.5, unit = "mm", fmt }) {
   return (
     <label className="sl">
-      <div className="sl-top"><span>{label}</span><b>{fmtLen(v, unit)}</b></div>
+      <div className="sl-top"><span>{label}</span><b>{fmt ? fmt(v) : fmtLen(v, unit)}</b></div>
       <input type="range" min={min} max={max} step={step} value={v} onChange={(e) => set(parseFloat(e.target.value))} />
     </label>
   );
